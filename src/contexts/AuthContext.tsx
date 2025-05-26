@@ -1,6 +1,6 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getTokenFromCookies, removeTokenFromCookies, setTokenInCookies, authAPI, LoginCredentials, SignupCredentials } from '@/lib/api';
+import { useNavigate } from 'react-router-dom';
 
 interface User {
   id: string;
@@ -29,6 +29,7 @@ export const useAuth = () => {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -49,24 +50,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (credentials: LoginCredentials) => {
     try {
+      setIsLoading(true);
       const response = await authAPI.login(credentials);
       setTokenInCookies(response.access_token);
       setUser({
         id: response.user_id,
         email: response.email,
-        full_name: response.full_name,
+        full_name: response.full_name || '',
         avatar_url: response.avatar_url,
       });
+      console.log('Login successful, navigating to dashboard');
+      navigate('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
       throw error;
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const signup = async (credentials: SignupCredentials) => {
     try {
       await authAPI.signup(credentials);
-      // After signup, you might want to auto-login or redirect to login
+      // After signup, redirect to login
+      navigate('/login');
     } catch (error) {
       console.error('Signup error:', error);
       throw error;
@@ -81,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       removeTokenFromCookies();
       setUser(null);
+      navigate('/login');
     }
   };
 

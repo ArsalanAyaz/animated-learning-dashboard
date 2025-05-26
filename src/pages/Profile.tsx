@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/Layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,41 +6,133 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { useAuth } from '@/contexts/AuthContext';
-import { Camera, Save, User } from 'lucide-react';
+import { Camera, Save, User, Loader2 } from 'lucide-react';
+import { apiRequest } from '@/lib/api';
+import { toast } from 'sonner';
+
+interface ProfileData {
+  full_name: string;
+  email: string;
+  bio: string;
+  avatar_url: string;
+}
 
 const Profile = () => {
-  const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({
-    fullName: user?.full_name || '',
-    email: user?.email || '',
-    bio: ''
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [profileData, setProfileData] = useState<ProfileData>({
+    full_name: '',
+    email: '',
+    bio: '',
+    avatar_url: ''
   });
+
+  // Fetch profile data on component mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        setIsLoading(true);
+        const data = await apiRequest('/profile/profile');
+        setProfileData(data);
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+        toast.error('Failed to load profile data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
+    setProfileData(prev => ({
       ...prev,
       [name]: value
     }));
   };
 
-  const handleSave = () => {
-    // Here you would typically make an API call to update the profile
-    console.log('Saving profile:', formData);
-    setIsEditing(false);
+  const handleSave = async () => {
+    try {
+      setIsSaving(true);
+      const updatedProfile = await apiRequest('/profile/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          full_name: profileData.full_name,
+          bio: profileData.bio
+        })
+      });
+      setProfileData(updatedProfile);
+      setIsEditing(false);
+      toast.success('Profile updated successfully');
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      toast.error('Failed to update profile');
+    } finally {
+      setIsSaving(false);
+    }
   };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size should be less than 5MB');
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await apiRequest('/profile/profile/avatar', {
+        method: 'POST',
+        body: formData,
+      });
+
+      setProfileData(prev => ({
+        ...prev,
+        avatar_url: `${response.avatar_url}?t=${Date.now()}`
+      }));
+      toast.success('Avatar updated successfully');
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      toast.error('Failed to upload avatar');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
-      <div className="max-w-2xl mx-auto space-y-6">
-        {/* Profile Header */}
+      <div className="max-w-2xl mx-auto">
         <Card className="bg-gray-800 border-gray-700">
           <CardHeader>
             <CardTitle className="text-2xl text-white">Profile Settings</CardTitle>
             <CardDescription className="text-gray-400">
-              Manage your personal information and preferences
+              Manage your personal information
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -49,50 +140,52 @@ const Profile = () => {
             <div className="flex items-center space-x-4">
               <div className="relative">
                 <Avatar className="h-20 w-20">
-                  <AvatarImage src={user?.avatar_url || ''} />
+                  <AvatarImage src={profileData.avatar_url} />
                   <AvatarFallback className="bg-blue-600 text-white text-xl">
-                    {user?.full_name?.charAt(0) || 'U'}
+                    {profileData.full_name?.charAt(0) || 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <Button
-                  size="sm"
-                  className="absolute bottom-0 right-0 h-8 w-8 rounded-full bg-blue-600 hover:bg-blue-700 p-0"
-                >
-                  <Camera className="h-4 w-4" />
-                </Button>
+                <div className="absolute bottom-0 right-0">
+                  <input
+                    id="avatar-upload"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                    disabled={isUploading}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-8 w-8 rounded-full bg-blue-600 hover:bg-blue-700 p-0 cursor-pointer"
+                    disabled={isUploading}
+                    onClick={() => document.getElementById('avatar-upload')?.click()}
+                  >
+                    {isUploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Camera className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
               <div>
-                <h3 className="text-white font-semibold">{user?.full_name}</h3>
-                <p className="text-gray-400">{user?.email}</p>
+                <h3 className="text-white font-semibold">{profileData.full_name}</h3>
+                <p className="text-gray-400">{profileData.email}</p>
               </div>
             </div>
 
             {/* Profile Form */}
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="fullName" className="text-white">Full Name</Label>
-                  <Input
-                    id="fullName"
-                    name="fullName"
-                    value={formData.fullName}
-                    onChange={handleInputChange}
-                    disabled={!isEditing}
-                    className="bg-gray-700 border-gray-600 text-white disabled:opacity-50"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-white">Email</Label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    disabled={!isEditing}
-                    className="bg-gray-700 border-gray-600 text-white disabled:opacity-50"
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="full_name" className="text-white">Full Name</Label>
+                <Input
+                  id="full_name"
+                  name="full_name"
+                  value={profileData.full_name}
+                  onChange={handleInputChange}
+                  disabled={!isEditing}
+                  className="bg-gray-700 border-gray-600 text-white disabled:opacity-50"
+                />
               </div>
               
               <div className="space-y-2">
@@ -100,7 +193,7 @@ const Profile = () => {
                 <Textarea
                   id="bio"
                   name="bio"
-                  value={formData.bio}
+                  value={profileData.bio}
                   onChange={handleInputChange}
                   disabled={!isEditing}
                   placeholder="Tell us about yourself..."
@@ -116,14 +209,20 @@ const Profile = () => {
                   <Button 
                     onClick={handleSave}
                     className="bg-green-600 hover:bg-green-700"
+                    disabled={isSaving}
                   >
-                    <Save className="h-4 w-4 mr-2" />
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
                     Save Changes
                   </Button>
                   <Button 
                     variant="outline" 
                     onClick={() => setIsEditing(false)}
                     className="border-gray-600 text-gray-300 hover:bg-gray-700"
+                    disabled={isSaving}
                   >
                     Cancel
                   </Button>
@@ -138,47 +237,6 @@ const Profile = () => {
                 </Button>
               )}
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Learning Statistics */}
-        <Card className="bg-gray-800 border-gray-700">
-          <CardHeader>
-            <CardTitle className="text-white">Learning Statistics</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-400">3</div>
-                <div className="text-gray-400">Courses Enrolled</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-400">15</div>
-                <div className="text-gray-400">Assignments Completed</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-400">8</div>
-                <div className="text-gray-400">Quizzes Passed</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Account Settings */}
-        <Card className="bg-gray-800 border-gray-700">
-          <CardHeader>
-            <CardTitle className="text-white">Account Settings</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Button variant="outline" className="w-full border-gray-600 text-gray-300 hover:bg-gray-700">
-              Change Password
-            </Button>
-            <Button variant="outline" className="w-full border-gray-600 text-gray-300 hover:bg-gray-700">
-              Download My Data
-            </Button>
-            <Button variant="destructive" className="w-full">
-              Delete Account
-            </Button>
           </CardContent>
         </Card>
       </div>
